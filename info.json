@@ -1,0 +1,13 @@
+{
+  "name": "SleepyChunks",
+  "version": "0.1.0",
+  "title": "Sleepy Chunks",
+  "author": "MyNameIsTrez",
+  "contact": "",
+  "homepage": "",
+  "description": "Adds a simple assembler recipe that takes 4 iron plates and (after 1 second) outputs 4 iron plates.",
+  "factorio_version": "2.0",
+  "dependencies": [
+    "base >= 2.0.67"
+  ]
+}
