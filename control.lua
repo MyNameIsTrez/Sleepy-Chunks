@@ -9,7 +9,7 @@ commands.add_command(
 )
 -- Table to store drawn rectangles per player
 local drawn_rectangles = {}
-rendering.clear("SleepyChunks") -- Necessary for game.reload_mods()
+rendering.clear("SleepyChunks") -- Guarantees old rectangles are not drawn anymore
 
 -- Helper to draw a rectangle for a chunk
 local function draw_chunk_rectangle(surface, player_index, left_top, right_bottom)
@@ -45,7 +45,7 @@ script.on_event(defines.events.on_player_changed_position, function(event)
     player.clear_console()
     local surface = player.surface
     local px, py = player.position.x, player.position.y
-    local chunk_radius = 0  -- adjust as needed
+    local chunk_radius = 0
     local chunk_size = 32   -- default Factorio chunk size
 
     -- Initialize player's cache if not exists
@@ -75,6 +75,22 @@ script.on_event(defines.events.on_player_changed_position, function(event)
                     -- Draw new rectangle and store its ID
                     local rect_id = draw_chunk_rectangle(surface, player.index, left_top, right_bottom)
                     new_cache[key] = rect_id
+
+                    -- surface.create_entity{
+                    --     name = "loader",
+                    --     position = left_top,
+                    --     direction = defines.direction.east,
+                    --     type = "input",
+                    --     force = "player"
+                    -- }
+
+                    -- surface.create_entity{
+                    --     name = "steel-chest",
+                    --     position = {x=left_top.x + 1, y=left_top.y},
+                    --     direction = defines.direction.east,
+                    --     type = "input",
+                    --     force = "player"
+                    -- }
                 end
             end
         end
