@@ -8,8 +8,37 @@ commands.add_command(
     end
 )
 -- Table to store drawn rectangles per player
-drawn_rectangles = {}
+local drawn_rectangles = {}
 rendering.clear("SleepyChunks") -- Necessary for game.reload_mods()
+
+-- Helper to draw a rectangle for a chunk
+local function draw_chunk_rectangle(surface, player_index, left_top, right_bottom)
+    local rect_id = rendering.draw_rectangle{
+        color = {r=0, g=0, b=1, a=0.3},
+        filled = true,
+        left_top = left_top,
+        right_bottom = right_bottom,
+        surface = surface,
+        players = {player_index},
+        draw_on_ground = true
+    }
+    -- game.print("drawing rectangle at left_top={x=" .. left_top.x .. ",y=" .. left_top.y .. "}")
+    return rect_id
+end
+
+-- Helper to set all entities in a chunk to active
+local function wake_chunk_entities(surface, chunk_pos, chunk_size)
+    local left_top = {x = chunk_pos.x * chunk_size, y = chunk_pos.y * chunk_size}
+    local right_bottom = {x = left_top.x + chunk_size, y = left_top.y + chunk_size}
+
+    local area = {left_top = left_top, right_bottom = right_bottom}
+    local entities = surface.find_entities(area)
+    for _, entity in pairs(entities) do
+        if entity.valid then
+            entity.active = true
+        end
+    end
+end
 
 script.on_event(defines.events.on_player_changed_position, function(event)
     local player = game.get_player(event.player_index)
@@ -21,7 +50,6 @@ script.on_event(defines.events.on_player_changed_position, function(event)
 
     -- Initialize player's cache if not exists
     drawn_rectangles[player.index] = drawn_rectangles[player.index] or {}
-
     local player_cache = drawn_rectangles[player.index]
     local new_cache = {}
 
@@ -36,22 +64,16 @@ script.on_event(defines.events.on_player_changed_position, function(event)
                 local left_top = {x = chunk_pos.x * chunk_size, y = chunk_pos.y * chunk_size}
                 local right_bottom = {x = left_top.x + chunk_size, y = left_top.y + chunk_size}
 
+                -- Wake all entities in the chunk
+                wake_chunk_entities(surface, chunk_pos, chunk_size)
+
                 -- Reuse existing rectangle if it exists
                 if player_cache[key] then
                     new_cache[key] = player_cache[key]
                     player_cache[key] = nil  -- mark as still active
                 else
                     -- Draw new rectangle and store its ID
-                    local rect_id = rendering.draw_rectangle{
-                        color = {r=0, g=0, b=1, a=0.3},
-                        filled = true,
-                        left_top = left_top,
-                        right_bottom = right_bottom,
-                        surface = surface,
-                        players = {player.index},
-                        draw_on_ground = true
-                    }
-                    game.print("drawing rectangle at left_top={x=" .. left_top.x .. ",y=" .. left_top.y .. "}")
+                    local rect_id = draw_chunk_rectangle(surface, player.index, left_top, right_bottom)
                     new_cache[key] = rect_id
                 end
             end
@@ -60,7 +82,6 @@ script.on_event(defines.events.on_player_changed_position, function(event)
 
     -- Destroy rectangles that are no longer visible
     for _, rect_id in pairs(player_cache) do
-        -- game.print(rect_id)
         rect_id.destroy()
     end
 
