@@ -1,4 +1,5 @@
--- In control.lua
+local chunk_size = 32
+
 commands.add_command(
     "hello",
     "Prints 'Hello, World!'",
@@ -6,6 +7,53 @@ commands.add_command(
         game.print("Hello, World!")
     end
 )
+
+script.on_event(defines.events.on_player_changed_position, function(event)
+    local player = game.get_player(event.player_index)
+
+    player.clear_console()
+
+    local surface = player.surface
+    local px, py = player.position.x, player.position.y
+    -- game.print(serpent.line{px=px,py=py})
+    local chunk_radius = 0
+    
+    -- Loop over chunks in a square around the player
+    for dx = -chunk_radius, chunk_radius do
+        for dy = -chunk_radius, chunk_radius do
+            -- game.print(serpent.line{dx=dx,dy=dy})
+
+            local chunk_pos = {x = math.floor(px/chunk_size) + dx, y = math.floor(py/chunk_size) + dy}
+            -- game.print(serpent.line{x=chunk_pos.x,y=chunk_pos.y})
+
+            -- Check if the chunk is visible
+            if player.force.is_chunk_visible(surface, chunk_pos) then
+                local left_top = {x = chunk_pos.x * chunk_size, y = chunk_pos.y * chunk_size}
+                local right_bottom = {x = left_top.x + chunk_size, y = left_top.y + chunk_size}
+                game.print(serpent.line{left_top=left_top,right_bottom=right_bottom})
+
+                rendering.draw_rectangle{
+                    color = {r=0, g=0, b=1, a=0.3},
+                    left_top = left_top,
+                    right_bottom = right_bottom,
+                    surface = surface,
+                    players = {player.index},
+                    draw_on_ground = true
+                }
+            end
+        end
+    end
+end)
+
+-- script.on_event(defines.events.on_tick, function(event)
+--     for _, player in pairs(game.connected_players) do
+--         game.print("global:")
+--         game.print(global)
+
+--         -- local pos = player.position
+--         -- player.print("Your position: x=" .. pos.x .. ", y=" .. pos.y)
+--     end
+-- end)
 
 -- -- Global tables
 -- global.chunk_states = global.chunk_states or {}
