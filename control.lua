@@ -76,6 +76,19 @@ script.on_event(defines.events.on_player_changed_position, function(event)
                     local rect_id = draw_chunk_rectangle(surface, player.index, left_top, right_bottom)
                     new_cache[key] = rect_id
 
+                    local area = {left_top, right_bottom}
+
+                    game.print(serpent.line(area))
+                    local count = 0
+                    for _, belt in pairs(surface.find_entities_filtered{area = area, type="transport-belt"}) do
+                        count = count + 1
+                        -- game.print(belt.get_transport_line(1))
+                        -- if belt.valid and belt.get_transport_line(1) then
+                        --     count = count + #belt.get_transport_line(1)
+                        -- end
+                    end
+                    game.print(count)
+
                     -- surface.create_entity{
                     --     name = "loader",
                     --     position = left_top,
