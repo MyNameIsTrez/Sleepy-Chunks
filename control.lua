@@ -48,20 +48,22 @@ local DIRECTION_VECTORS = {
 
 local function classify_chunk_edge_belt(x, y, belt_direction, surface)
     local local_x, local_y = x % CHUNK_SIZE, y % CHUNK_SIZE
+
+    -- Only check belts on the chunk edge
     if local_x >= 1 and local_x <= CHUNK_SIZE - 1 and local_y >= 1 and local_y <= CHUNK_SIZE - 1 then
-        return false
+        return nil
     end
 
-    -- Determine which edge
+    -- Determine neighboring position
     local neighbor_pos
     if local_y < 1 then neighbor_pos = {x = x, y = y - 1}       -- north
     elseif local_y > CHUNK_SIZE - 1 then neighbor_pos = {x = x, y = y + 1} -- south
     elseif local_x < 1 then neighbor_pos = {x = x - 1, y = y}  -- west
     elseif local_x > CHUNK_SIZE - 1 then neighbor_pos = {x = x + 1, y = y} -- east
-    else return false end
+    else return nil end
 
     local neighbor_belt = surface.find_entity("transport-belt", neighbor_pos)
-    if not neighbor_belt then return false end
+    if not neighbor_belt then return nil end
 
     local this_vec = DIRECTION_VECTORS[belt_direction]
     local neighbor_vec = DIRECTION_VECTORS[neighbor_belt.direction]
@@ -69,17 +71,17 @@ local function classify_chunk_edge_belt(x, y, belt_direction, surface)
     local neighbor_flows_to_this = (neighbor_pos.x + neighbor_vec.x == x and neighbor_pos.y + neighbor_vec.y == y)
     local this_flows_to_neighbor = (x + this_vec.x == neighbor_pos.x and y + this_vec.y == neighbor_pos.y)
 
-    -- If both belts flow into each other, treat as no edge
+    -- If both belts flow into each other, ignore
     if neighbor_flows_to_this and this_flows_to_neighbor then
-        return false
+        return nil
     end
 
     if neighbor_flows_to_this then
-        return true, "incoming"
+        return "incoming"
     elseif this_flows_to_neighbor then
-        return true, "outgoing"
+        return "outgoing"
     else
-        return false
+        return nil
     end
 end
 
@@ -125,8 +127,8 @@ script.on_event(defines.events.on_player_changed_position, function(event)
 
                         local pos = belt.position
 
-                        local valid, flow_type = classify_chunk_edge_belt(pos.x, pos.y, belt.direction, surface)
-                        game.print(serpent.line{valid=valid, flow_type=flow_type})
+                        local flow_type = classify_chunk_edge_belt(pos.x, pos.y, belt.direction, surface)
+                        game.print("flow_type: " .. tostring(flow_type))
                     end
                 end
             end
