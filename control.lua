@@ -67,17 +67,21 @@ local function classify_chunk_edge_belt(x, y, belt_direction, surface)
     local this_vec = DIRECTION_VECTORS[belt_direction]
     local neighbor_vec = DIRECTION_VECTORS[neighbor_belt.direction]
 
-    -- If neighbor belt flows into this tile, it is incoming
-    if neighbor_pos.x + neighbor_vec.x == x and neighbor_pos.y + neighbor_vec.y == y then
+    local neighbor_flows_to_this = (neighbor_pos.x + neighbor_vec.x == x and neighbor_pos.y + neighbor_vec.y == y)
+    local this_flows_to_neighbor = (x + this_vec.x == neighbor_pos.x and y + this_vec.y == neighbor_pos.y)
+
+    -- If both belts flow into each other, treat as no edge
+    if neighbor_flows_to_this and this_flows_to_neighbor then
+        return false
+    end
+
+    if neighbor_flows_to_this then
         return true, "incoming"
-    end
-
-    -- If this belt flows into neighbor tile, it is outgoing
-    if x + this_vec.x == neighbor_pos.x and y + this_vec.y == neighbor_pos.y then
+    elseif this_flows_to_neighbor then
         return true, "outgoing"
+    else
+        return false
     end
-
-    return false
 end
 
 script.on_event(defines.events.on_player_changed_position, function(event)
