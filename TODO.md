@@ -1,1 +1,0 @@
-- Check whether Factorio modders typically use a symlink, or some other method, to work on their mods.
