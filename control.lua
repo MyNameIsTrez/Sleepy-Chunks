@@ -1,13 +1,5 @@
 local CHUNK_SIZE = 32
 
-commands.add_command(
-    "hello",
-    "Prints 'Hello, World!'",
-    function(command)
-        game.print("Hello, World!")
-    end
-)
-
 local drawn_rectangles = {}
 rendering.clear("SleepyChunks") -- Guarantees old rectangles are not drawn anymore
 
