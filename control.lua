@@ -41,17 +41,21 @@ local function wake_chunk_entities(surface, chunk_pos)
 end
 
 local function classify_chunk_edge_belt(x, y, belt_direction, surface)
-    local local_x = x % CHUNK_SIZE
-    local local_y = y % CHUNK_SIZE
+    local local_x, local_y = x % CHUNK_SIZE, y % CHUNK_SIZE
 
-    local on_edge = local_x < 1 or local_x > CHUNK_SIZE - 1 or
-         local_y < 1 or local_y > CHUNK_SIZE - 1
-
-    if not on_edge then
+    -- Only consider belts on chunk edges
+    if local_x >= 1 and local_x <= CHUNK_SIZE - 1 and local_y >= 1 and local_y <= CHUNK_SIZE - 1 then
         return false
     end
 
-    -- Determine which edge the belt is on
+    -- Determine edge and corresponding direction vectors
+    local edge_data = {
+        north = {dx = 0, dy = -1, incoming = defines.direction.south, outgoing = defines.direction.north},
+        south = {dx = 0, dy = 1,  incoming = defines.direction.north, outgoing = defines.direction.south},
+        west  = {dx = -1, dy = 0, incoming = defines.direction.east,  outgoing = defines.direction.west},
+        east  = {dx = 1,  dy = 0, incoming = defines.direction.west,  outgoing = defines.direction.east},
+    }
+
     local edge
     if local_y < 1 then
         edge = "north"
@@ -65,56 +69,19 @@ local function classify_chunk_edge_belt(x, y, belt_direction, surface)
         return false
     end
 
-    -- Calculate neighbor chunk coordinates
-    local cx = math.floor(x / CHUNK_SIZE)
-    local cy = math.floor(y / CHUNK_SIZE)
-    local neighbor_cx, neighbor_cy = cx, cy
-    if edge == "north" then neighbor_cy = cy - 1
-    elseif edge == "south" then neighbor_cy = cy + 1
-    elseif edge == "west"  then neighbor_cx = cx - 1
-    elseif edge == "east"  then neighbor_cx = cx + 1
+    local ed = edge_data[edge]
+
+    -- Check if neighbor has a belt at the connecting position
+    local neighbor_belt = surface.find_entity("transport-belt", {x + ed.dx, y + ed.dy})
+    if not neighbor_belt then return false end
+
+    -- Determine if this belt is incoming or outgoing
+    if belt_direction == ed.incoming then
+        return true, "incoming"
+    elseif belt_direction == ed.outgoing then
+        return true, "outgoing"
     end
 
-    -- Position in the neighbor chunk to check for connecting belt
-    local neighbor_x = x
-    local neighbor_y = y
-    if edge == "north" then neighbor_y = y - 1
-    elseif edge == "south" then neighbor_y = y + 1
-    elseif edge == "west"  then neighbor_x = x - 1
-    elseif edge == "east"  then neighbor_x = x + 1
-    end
-
-    -- Find any belt in the neighbor chunk at that position
-    local neighbor_belt = surface.find_entity("transport-belt", {neighbor_x, neighbor_y})
-
-    -- Determine if belt is incoming or outgoing
-    if edge == "north" then
-        if belt_direction == defines.direction.south and neighbor_belt then
-            return true, "incoming"
-        elseif belt_direction == defines.direction.north and neighbor_belt then
-            return true, "outgoing"
-        end
-    elseif edge == "south" then
-        if belt_direction == defines.direction.north and neighbor_belt then
-            return true, "incoming"
-        elseif belt_direction == defines.direction.south and neighbor_belt then
-            return true, "outgoing"
-        end
-    elseif edge == "west" then
-        if belt_direction == defines.direction.east and neighbor_belt then
-            return true, "incoming"
-        elseif belt_direction == defines.direction.west and neighbor_belt then
-            return true, "outgoing"
-        end
-    elseif edge == "east" then
-        if belt_direction == defines.direction.west and neighbor_belt then
-            return true, "incoming"
-        elseif belt_direction == defines.direction.east and neighbor_belt then
-            return true, "outgoing"
-        end
-    end
-
-    -- Otherwise, not a valid incoming/outgoing belt
     return false
 end
 
