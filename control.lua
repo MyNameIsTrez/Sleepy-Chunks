@@ -1,137 +1,185 @@
-local CHUNK_SIZE = 32
+-- control.lua
+-- Sleepy Chunks memory cell tracker and signal printer (decider combinator version with detailed logging)
 
-local drawn_rectangles = {}
-rendering.clear("SleepyChunks") -- Guarantees old rectangles are not drawn anymore
+memory_cells = memory_cells or {}
 
--- Helper to draw a rectangle for a chunk
-local function draw_chunk_rectangle(surface, player_index, left_top, right_bottom)
-    local rect_id = rendering.draw_rectangle{
-        color = {r=0, g=0, b=1, a=0.001},
-        filled = true,
-        left_top = left_top,
-        right_bottom = right_bottom,
-        surface = surface,
-        players = {player_index},
-        draw_on_ground = true
+if not storage then storage = {} end
+storage.channels = storage.channels or {}
+storage.transceivers = storage.transceivers or {}
+
+local MEMORY_CELL_SURFACE = "Sleepy Chunks"
+local DEBUG_MODE = true
+
+-- === Debug logger ===
+local function log(msg)
+    if DEBUG_MODE then game.print(msg) end
+end
+
+-- === Hidden surface ===
+local function get_hidden_surface()
+    local surf = game.surfaces[MEMORY_CELL_SURFACE]
+    if surf then return surf end
+
+    log("Creating hidden surface "..MEMORY_CELL_SURFACE)
+    surf = game.create_surface(MEMORY_CELL_SURFACE, {
+        width=1, height=1,
+        autoplace_settings={
+            ["decorative"]={treat_missing_as_default=false, settings={}},
+            ["entity"]={treat_missing_as_default=false, settings={}},
+            ["tile"]={treat_missing_as_default=false, settings={["out-of-map"]={}}}
+        }
+    })
+
+    -- Force chunk generation so circuits become active
+    surf.request_to_generate_chunks({0,0}, 1)
+    surf.force_generate_chunk_requests()
+    log("Hidden surface chunks generated")
+
+    for _, f in pairs(game.forces) do
+        f.set_surface_hidden(surf, true)
+    end
+    return surf
+end
+
+-- === Hidden central pole for a channel ===
+local function get_hidden_pole(force, channel)
+    storage.channels[force.name] = storage.channels[force.name] or {}
+    local pole = storage.channels[force.name][channel]
+    if pole and pole.valid then
+        log("Reusing existing hidden pole for "..force.name.." / "..channel)
+        return pole
+    end
+
+    local surf = get_hidden_surface()
+    pole = surf.create_entity{name="big-electric-pole", position={1,0}, force=force}
+    pole.teleport({0,0})
+    storage.channels[force.name][channel] = pole
+    log("Created hidden pole for "..force.name.." / "..channel)
+    return pole
+end
+
+-- === Hidden decider combinator (signal source) ===
+local function create_hidden_source(force, name)
+    local surf = get_hidden_surface()
+    local comb = surf.create_entity{
+        name="decider-combinator",
+        position={0,0},
+        force=force,
+        create_build_effect_smoke=false
     }
-    return rect_id
-end
-
--- Helper to set all entities in a chunk to active
-local function wake_chunk_entities(surface, chunk_pos)
-    local left_top = {x = chunk_pos.x * CHUNK_SIZE, y = chunk_pos.y * CHUNK_SIZE}
-    local right_bottom = {x = left_top.x + CHUNK_SIZE, y = left_top.y + CHUNK_SIZE}
-
-    local area = {left_top = left_top, right_bottom = right_bottom}
-    local entities = surface.find_entities(area)
-    for _, entity in pairs(entities) do
-        if entity.valid then
-            entity.active = true
-        end
-    end
-end
-
-local DIRECTION_VECTORS = {
-    [defines.direction.north] = {x = 0, y = -1},
-    [defines.direction.east]  = {x = 1, y = 0},
-    [defines.direction.south] = {x = 0, y = 1},
-    [defines.direction.west]  = {x = -1, y = 0},
-}
-
-local function classify_chunk_edge_belt(x, y, belt_direction, surface)
-    local local_x, local_y = x % CHUNK_SIZE, y % CHUNK_SIZE
-
-    -- Only check belts on the chunk edge
-    if local_x >= 1 and local_x <= CHUNK_SIZE - 1 and local_y >= 1 and local_y <= CHUNK_SIZE - 1 then
+    if not comb or not comb.valid then
+        log("ERROR: Failed to create hidden source "..name)
         return nil
     end
-
-    -- Determine neighboring position
-    local neighbor_pos
-    if local_y < 1 then neighbor_pos = {x = x, y = y - 1}       -- north
-    elseif local_y > CHUNK_SIZE - 1 then neighbor_pos = {x = x, y = y + 1} -- south
-    elseif local_x < 1 then neighbor_pos = {x = x - 1, y = y}  -- west
-    elseif local_x > CHUNK_SIZE - 1 then neighbor_pos = {x = x + 1, y = y} -- east
-    else return nil end
-
-    local neighbor_belt = surface.find_entity("transport-belt", neighbor_pos)
-    if not neighbor_belt then return nil end
-
-    local this_vec = DIRECTION_VECTORS[belt_direction]
-    local neighbor_vec = DIRECTION_VECTORS[neighbor_belt.direction]
-
-    local neighbor_flows_to_this = (neighbor_pos.x + neighbor_vec.x == x and neighbor_pos.y + neighbor_vec.y == y)
-    local this_flows_to_neighbor = (x + this_vec.x == neighbor_pos.x and y + this_vec.y == neighbor_pos.y)
-
-    -- If both belts flow into each other, ignore
-    if neighbor_flows_to_this and this_flows_to_neighbor then
-        return nil
-    end
-
-    if neighbor_flows_to_this then
-        return "incoming"
-    elseif this_flows_to_neighbor then
-        return "outgoing"
-    else
-        return nil
-    end
+    local behavior = comb.get_or_create_control_behavior()
+    behavior.parameters = {
+        comparator = "=",
+        output_signal = {type="virtual", name="signal-anything"},
+    }
+    storage.transceivers[comb.unit_number] = {entity=comb, force=force, name=name}
+    log("Created hidden source "..name.." (unit_number="..comb.unit_number..")")
+    return comb
 end
 
-script.on_event(defines.events.on_player_changed_position, function(event)
-    local player = game.get_player(event.player_index)
-    -- player.clear_console() -- TODO: REMOVE!
-
+-- === Create a memory cell ===
+local function create_memory_cell(player)
+    local force = player.force
     local surface = player.surface
-    local px, py = player.position.x, player.position.y
-    local chunk_radius = 0
+    local pos = player.position
 
-    -- Initialize player's cache if not exists
-    drawn_rectangles[player.index] = drawn_rectangles[player.index] or {}
-    local player_cache = drawn_rectangles[player.index]
-    local new_cache = {}
+    log("Creating memory cell for player "..player.name.." at "..pos.x..","..pos.y)
 
-    -- Loop over chunks in a square around the player
-    for dx = -chunk_radius, chunk_radius do
-        for dy = -chunk_radius, chunk_radius do
-            local chunk_pos = {x = math.floor(px/CHUNK_SIZE) + dx, y = math.floor(py/CHUNK_SIZE) + dy}
-            local key = chunk_pos.x .. "," .. chunk_pos.y
+    -- Create the visible belt
+    local belt = surface.create_entity{
+        name="transport-belt",
+        position={pos.x-1, pos.y},
+        direction=defines.direction.east,
+        force=force,
+        create_build_effect_smoke=false
+    }
+    if not belt or not belt.valid then
+        player.print("Failed to create belt")
+        log("ERROR: belt creation failed")
+        return nil
+    end
 
-            -- Check if the chunk is visible
-            if player.force.is_chunk_visible(surface, chunk_pos) then
-                local left_top = {x = chunk_pos.x * CHUNK_SIZE, y = chunk_pos.y * CHUNK_SIZE}
-                local right_bottom = {x = left_top.x + CHUNK_SIZE, y = left_top.y + CHUNK_SIZE}
+    local belt_behavior = belt.get_or_create_control_behavior()
+    belt_behavior.read_contents = true
+    log("Belt created at "..(pos.x-1)..","..pos.y.." (unit_number="..belt.unit_number..")")
 
-                -- Wake all entities in the chunk
-                wake_chunk_entities(surface, chunk_pos, CHUNK_SIZE)
+    -- Hidden decider combinator as signal source
+    local comb = create_hidden_source(force, "cell-"..belt.unit_number)
+    if not comb then
+        log("ERROR: failed to create hidden source combinator")
+        return nil
+    end
 
-                -- Reuse existing rectangle if it exists
-                if player_cache[key] then
-                    new_cache[key] = player_cache[key]
-                    player_cache[key] = nil  -- mark as still active
-                else
-                    -- Draw new rectangle and store its ID
-                    local rect_id = draw_chunk_rectangle(surface, player.index, left_top, right_bottom)
-                    new_cache[key] = rect_id
+    -- Hidden central pole for the channel
+    local pole = get_hidden_pole(force, "cell-pole-"..belt.unit_number)
+    if not pole or not pole.valid then
+        log("ERROR: failed to create hidden pole")
+        return nil
+    end
 
-                    local area = {left_top, right_bottom}
-                    for _, belt in pairs(surface.find_entities_filtered{area = area, type="transport-belt"}) do
-                        game.print(belt)
+    -- Connect combinator to pole
+    local comb_out = comb.get_wire_connector(defines.wire_connector_id.combinator_output_red, true)
+    local pole_conn = pole.get_wire_connector(defines.wire_connector_id.circuit_red, true)
+    local comb_connected = comb_out.connect_to(pole_conn, false, defines.wire_origin.player)
+    log("Comb->Pole connect_to returned: "..tostring(comb_connected))
 
-                        local pos = belt.position
+    -- Connect belt to pole
+    local belt_out = belt.get_wire_connector(defines.wire_connector_id.circuit_red, true)
+    local belt_connected = belt_out.connect_to(pole_conn, false, defines.wire_origin.player)
+    log("Belt->Pole connect_to returned: "..tostring(belt_connected))
 
-                        local flow_type = classify_chunk_edge_belt(pos.x, pos.y, belt.direction, surface)
-                        game.print("flow_type: " .. tostring(flow_type))
-                    end
+    memory_cells[#memory_cells+1] = {combinator=comb, belt=belt, pole=pole}
+    player.print("Memory cell created and connected via hidden source and pole.")
+    return comb, belt
+end
+
+-- === Print memory cell signals ===
+local function print_memory_cell_signals()
+    log("=== Checking memory cell signals ===")
+    for i, cell in ipairs(memory_cells) do
+        local comb = cell.combinator
+        if comb and comb.valid then
+            local net = comb.get_circuit_network(defines.wire_type.red)
+            if net and net.valid then
+                local signals = net.signals or {}
+                local str = "Memory Cell "..i..": "
+                for _, s in ipairs(signals) do
+                    str = str..string.format("[%s]=%d ", s.signal.name, s.count)
                 end
+                game.print(str)
+                log("Memory Cell "..i.." network valid with "..#signals.." signals")
+            else
+                game.print("Memory Cell "..i..": net is nil or invalid")
+                log("Memory Cell "..i.." network invalid (net is nil or invalid)")
             end
+        else
+            game.print("Memory Cell "..i..": invalid combinator")
+            log("Memory Cell "..i.." combinator invalid")
         end
     end
+end
 
-    -- Destroy rectangles that are no longer visible
-    for _, rect_id in pairs(player_cache) do
-        rect_id.destroy()
-    end
+-- === Commands / ticks ===
+commands.add_command("create_memory_cell", "Create Sleepy Chunks memory cell", function(cmd)
+    local player = game.players[cmd.player_index]
+    create_memory_cell(player)
+end)
 
-    -- Update the cache
-    drawn_rectangles[player.index] = new_cache
+script.on_nth_tick(60, print_memory_cell_signals)
+
+-- === Init / configuration changed ===
+script.on_init(function()
+    storage.channels = storage.channels or {}
+    storage.transceivers = storage.transceivers or {}
+    log("Sleepy Chunks initialized")
+end)
+
+script.on_configuration_changed(function()
+    storage.channels = storage.channels or {}
+    storage.transceivers = storage.transceivers or {}
+    log("Sleepy Chunks configuration changed")
 end)
