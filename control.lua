@@ -1,5 +1,5 @@
 -- control.lua
--- Sleepy Chunks memory cell tracker and signal printer (decider combinator version with detailed logging)
+-- Sleepy Chunks memory cell tracker and signal printer (decider combinator version with energy interface)
 
 memory_cells = memory_cells or {}
 
@@ -30,14 +30,15 @@ local function get_hidden_surface()
         }
     })
 
-    -- Force chunk generation so circuits become active
     surf.request_to_generate_chunks({0,0}, 1)
     surf.force_generate_chunk_requests()
     log("Hidden surface chunks generated")
 
+    -- Hide from all forces
     for _, f in pairs(game.forces) do
         f.set_surface_hidden(surf, true)
     end
+
     return surf
 end
 
@@ -58,9 +59,25 @@ local function get_hidden_pole(force, channel)
     return pole
 end
 
--- === Hidden decider combinator (signal source) ===
+-- === Hidden decider combinator (signal source) with energy interface ===
 local function create_hidden_source(force, name)
     local surf = get_hidden_surface()
+
+    -- Energy interface to power the combinator
+    local energy_interface = surf.create_entity{
+        name="electric-energy-interface",
+        position={0,0},
+        force=force,
+        create_build_effect_smoke=false
+    }
+    if not energy_interface or not energy_interface.valid then
+        log("ERROR: Failed to create energy interface for "..name)
+        return nil
+    end
+    energy_interface.energy = energy_interface.electric_buffer_size -- fully charged
+    log("Created energy interface at 0,0 for "..name)
+
+    -- Decider combinator
     local comb = surf.create_entity{
         name="decider-combinator",
         position={0,0},
@@ -71,11 +88,14 @@ local function create_hidden_source(force, name)
         log("ERROR: Failed to create hidden source "..name)
         return nil
     end
+
+    -- Set combinator parameters
     local behavior = comb.get_or_create_control_behavior()
     behavior.parameters = {
         comparator = "=",
         output_signal = {type="virtual", name="signal-anything"},
     }
+
     storage.transceivers[comb.unit_number] = {entity=comb, force=force, name=name}
     log("Created hidden source "..name.." (unit_number="..comb.unit_number..")")
     return comb
@@ -89,7 +109,7 @@ local function create_memory_cell(player)
 
     log("Creating memory cell for player "..player.name.." at "..pos.x..","..pos.y)
 
-    -- Create the visible belt
+    -- Create visible belt
     local belt = surface.create_entity{
         name="transport-belt",
         position={pos.x-1, pos.y},
@@ -152,12 +172,12 @@ local function print_memory_cell_signals()
                 end
                 game.print(str)
                 log("Memory Cell "..i.." network valid with "..#signals.." signals")
+            elseif net then
+                log("Memory Cell "..i.." network is invalid")
             else
-                game.print("Memory Cell "..i..": net is nil or invalid")
-                log("Memory Cell "..i.." network invalid (net is nil or invalid)")
+                log("Memory Cell "..i.." network is nil")
             end
         else
-            game.print("Memory Cell "..i..": invalid combinator")
             log("Memory Cell "..i.." combinator invalid")
         end
     end
