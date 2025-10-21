@@ -1,5 +1,5 @@
 -- control.lua
--- Sleepy Chunks memory cell tracker and signal printer (decider combinator version with energy interface)
+-- Sleepy Chunks memory cell tracker and signal printer (decider combinator version with energy interface, all on Nauvis)
 
 memory_cells = memory_cells or {}
 
@@ -7,7 +7,6 @@ if not storage then storage = {} end
 storage.channels = storage.channels or {}
 storage.transceivers = storage.transceivers or {}
 
-local MEMORY_CELL_SURFACE = "Sleepy Chunks"
 local DEBUG_MODE = true
 
 -- === Debug logger ===
@@ -15,58 +14,31 @@ local function log(msg)
     if DEBUG_MODE then game.print(msg) end
 end
 
--- === Hidden surface ===
-local function get_hidden_surface()
-    local surf = game.surfaces[MEMORY_CELL_SURFACE]
-    if surf then return surf end
-
-    log("Creating hidden surface "..MEMORY_CELL_SURFACE)
-    surf = game.create_surface(MEMORY_CELL_SURFACE, {
-        width=1, height=1,
-        autoplace_settings={
-            ["decorative"]={treat_missing_as_default=false, settings={}},
-            ["entity"]={treat_missing_as_default=false, settings={}},
-            ["tile"]={treat_missing_as_default=false, settings={["out-of-map"]={}}}
-        }
-    })
-
-    surf.request_to_generate_chunks({0,0}, 1)
-    surf.force_generate_chunk_requests()
-    log("Hidden surface chunks generated")
-
-    -- Hide from all forces
-    for _, f in pairs(game.forces) do
-        f.set_surface_hidden(surf, true)
-    end
-
-    return surf
-end
-
 -- === Hidden central pole for a channel ===
-local function get_hidden_pole(force, channel)
+local function get_hidden_pole(surface, force, channel, pos)
     storage.channels[force.name] = storage.channels[force.name] or {}
     local pole = storage.channels[force.name][channel]
     if pole and pole.valid then
-        log("Reusing existing hidden pole for "..force.name.." / "..channel)
+        log("Reusing existing pole for "..force.name.." / "..channel)
         return pole
     end
 
-    local surf = get_hidden_surface()
-    pole = surf.create_entity{name="big-electric-pole", position={1,0}, force=force}
-    pole.teleport({0,0})
+    pole = surface.create_entity{
+        name = "big-electric-pole",
+        position = pos,
+        force = force
+    }
     storage.channels[force.name][channel] = pole
-    log("Created hidden pole for "..force.name.." / "..channel)
+    log("Created pole for "..force.name.." / "..channel.." at "..pos.x..","..pos.y)
     return pole
 end
 
--- === Hidden decider combinator (signal source) with energy interface ===
-local function create_hidden_source(force, name)
-    local surf = get_hidden_surface()
-
+-- === Hidden decider combinator source with energy interface ===
+local function create_hidden_source(surface, force, name, pos)
     -- Energy interface to power the combinator
-    local energy_interface = surf.create_entity{
+    local energy_interface = surface.create_entity{
         name="electric-energy-interface",
-        position={0,0},
+        position=pos,
         force=force,
         create_build_effect_smoke=false
     }
@@ -75,12 +47,12 @@ local function create_hidden_source(force, name)
         return nil
     end
     energy_interface.energy = energy_interface.electric_buffer_size -- fully charged
-    log("Created energy interface at 0,0 for "..name)
+    log("Created energy interface at "..pos.x..","..pos.y.." for "..name)
 
     -- Decider combinator
-    local comb = surf.create_entity{
+    local comb = surface.create_entity{
         name="decider-combinator",
-        position={0,0},
+        position=pos,
         force=force,
         create_build_effect_smoke=false
     }
@@ -96,8 +68,18 @@ local function create_hidden_source(force, name)
         output_signal = {type="virtual", name="signal-anything"},
     }
 
+    -- === 3. Connect combinator input/output together (red wire) ===
+    local out_red = comb.get_wire_connector(defines.wire_connector_id.combinator_output_red)
+    local in_red  = comb.get_wire_connector(defines.wire_connector_id.combinator_input_red)
+    if out_red and in_red then
+        out_red.connect_to(in_red, true, defines.wire_origin.player)
+        log("Connected combinator input and output (red wire) for "..name)
+    else
+        log("ERROR: failed to get red wire connectors for "..name)
+    end
+
     storage.transceivers[comb.unit_number] = {entity=comb, force=force, name=name}
-    log("Created hidden source "..name.." (unit_number="..comb.unit_number..")")
+    log("Created decider combinator "..name.." (unit_number="..comb.unit_number..") at "..pos.x..","..pos.y)
     return comb
 end
 
@@ -127,17 +109,20 @@ local function create_memory_cell(player)
     belt_behavior.read_contents = true
     log("Belt created at "..(pos.x-1)..","..pos.y.." (unit_number="..belt.unit_number..")")
 
-    -- Hidden decider combinator as signal source
-    local comb = create_hidden_source(force, "cell-"..belt.unit_number)
+    -- Offset for pole/combinator below the belt
+    local hidden_pos = {x=pos.x, y=pos.y+10}
+
+    -- Hidden decider combinator as signal source with energy interface
+    local comb = create_hidden_source(surface, force, "cell-"..belt.unit_number, hidden_pos)
     if not comb then
         log("ERROR: failed to create hidden source combinator")
         return nil
     end
 
     -- Hidden central pole for the channel
-    local pole = get_hidden_pole(force, "cell-pole-"..belt.unit_number)
+    local pole = get_hidden_pole(surface, force, "cell-pole-"..belt.unit_number, hidden_pos)
     if not pole or not pole.valid then
-        log("ERROR: failed to create hidden pole")
+        log("ERROR: failed to create pole")
         return nil
     end
 
@@ -153,7 +138,7 @@ local function create_memory_cell(player)
     log("Belt->Pole connect_to returned: "..tostring(belt_connected))
 
     memory_cells[#memory_cells+1] = {combinator=comb, belt=belt, pole=pole}
-    player.print("Memory cell created and connected via hidden source and pole.")
+    player.print("Memory cell created and connected via pole and decider combinator.")
     return comb, belt
 end
 
@@ -163,19 +148,17 @@ local function print_memory_cell_signals()
     for i, cell in ipairs(memory_cells) do
         local comb = cell.combinator
         if comb and comb.valid then
-            local net = comb.get_circuit_network(defines.wire_type.red)
-            if net and net.valid then
-                local signals = net.signals or {}
+            local signals = comb.get_signals(defines.wire_connector_id.combinator_output_red) or {}
+            if #signals > 0 then
                 local str = "Memory Cell "..i..": "
                 for _, s in ipairs(signals) do
                     str = str..string.format("[%s]=%d ", s.signal.name, s.count)
                 end
                 game.print(str)
                 log("Memory Cell "..i.." network valid with "..#signals.." signals")
-            elseif net then
-                log("Memory Cell "..i.." network is invalid")
             else
-                log("Memory Cell "..i.." network is nil")
+                game.print("Memory Cell "..i..": no signals on red wire yet")
+                log("Memory Cell "..i.." network is empty or not initialized")
             end
         else
             log("Memory Cell "..i.." combinator invalid")
