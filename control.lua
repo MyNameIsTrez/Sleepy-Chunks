@@ -23,7 +23,7 @@ local function get_hidden_surface()
     local surf = game.surfaces[MEMORY_CELL_SURFACE]
     if surf then return surf end
 
-    log("Creating hidden surface "..MEMORY_CELL_SURFACE)
+    -- log("Creating hidden surface "..MEMORY_CELL_SURFACE)
     surf = game.create_surface(MEMORY_CELL_SURFACE, {
         width=1, height=1,
         autoplace_settings={
@@ -35,7 +35,7 @@ local function get_hidden_surface()
 
     surf.request_to_generate_chunks({0,0}, 1)
     surf.force_generate_chunk_requests()
-    log("Hidden surface chunks generated")
+    -- log("Hidden surface chunks generated")
 
     for _, f in pairs(game.forces) do
         f.set_surface_hidden(surf, true)
@@ -44,7 +44,7 @@ local function get_hidden_surface()
     local pole = surf.create_entity{name="big-electric-pole", position={0,0}, force="neutral"}
     local energy_interface = surf.create_entity{name="electric-energy-interface", position={0,0}, force="neutral"}
     energy_interface.energy = energy_interface.electric_buffer_size
-    log("Spawned central pole and energy interface at (0,0) on hidden surface")
+    -- log("Spawned central pole and energy interface at (0,0) on hidden surface")
 
     return surf
 end
@@ -81,7 +81,7 @@ local function create_hidden_source(force, name, pos)
 end
 
 -- === Create memory cell for belt ===
-local function create_memory_cell_for_belt(belt)
+local function create_memory_cell_for_belt(belt, flow)
     local surface = belt.surface
     local force = belt.force
     local pos = belt.position
@@ -97,13 +97,13 @@ local function create_memory_cell_for_belt(belt)
     local belt_conn = belt.get_wire_connector(defines.wire_connector_id.circuit_red, true)
     local comb_in = comb.get_wire_connector(defines.wire_connector_id.combinator_input_red, true)
     if belt_conn and comb_in then
-        local connected = belt_conn.connect_to(comb_in, false, defines.wire_origin.player) -- TODO: Change to defines.wire_origin.script
-        log("Connected belt->combinator red wire: "..tostring(connected))
+        local connected = belt_conn.connect_to(comb_in, false, defines.wire_origin.script)
+        -- log("Connected belt->combinator red wire: "..tostring(connected))
     else
         log("ERROR: failed to get connectors for belt->combinator connection")
     end
 
-    memory_cells[#memory_cells+1] = {combinator=comb, belt=belt}
+    memory_cells[#memory_cells+1] = {combinator=comb, belt=belt, flow=flow}
     return comb
 end
 
@@ -122,7 +122,7 @@ local function update_memory_cell_display()
             belt_ui[belt.unit_number] = {}
 
             local x = belt.position.x
-            local y = belt.position.y - 1.5
+            local y = belt.position.y
             local row = 0
 
             for _, s in ipairs(signals) do
@@ -130,20 +130,21 @@ local function update_memory_cell_display()
 
                 local icon_id = rendering.draw_sprite{
                     sprite = sprite_name,
-                    target = {x=x-1, y=y - row*0.5},
+                    target = {x=x, y=y + row*0.5},
                     surface = belt.surface,
                     x_scale = 0.5,
                     y_scale = 0.5
                 }
                 table.insert(belt_ui[belt.unit_number], icon_id)
 
+                local sign = cell["flow"] == "incoming" and "+" or "-"
                 local text_id = rendering.draw_text{
-                    text = s.signal.name .. ": " .. s.count,
+                    text = sign .. s.count,
                     surface = belt.surface,
-                    target = {x=x+0.2, y=y - row*0.5},
+                    target = {x=x+0.25, y=y + row*0.5},
                     color = {r=1, g=1, b=1},
                     scale = 0.5,
-                    alignment = "left"
+                    alignment = "right"
                 }
                 table.insert(belt_ui[belt.unit_number], text_id)
                 row = row + 1
@@ -226,7 +227,7 @@ commands.add_command("light_sleep", "Mark chunk inactive", function(cmd)
     local args = {}
     for s in string.gmatch(cmd.parameter or "", "%S+") do table.insert(args, s) end
     local cx, cy = tonumber(args[1]), tonumber(args[2])
-    if not cx or not cy then player.print("Usage: /light_sleep <chunk_x> <chunk_y>") return end
+    if not cx or not cy then log("Usage: /light_sleep <chunk_x> <chunk_y>") return end
 
     local surface = player.surface
     local chunk_pos = {x=cx, y=cy}
@@ -234,20 +235,20 @@ commands.add_command("light_sleep", "Mark chunk inactive", function(cmd)
     -- Mark entities inactive
     wake_chunk_entities(surface, chunk_pos, false)
 
-    -- Draw blue rectangle
     local left_top = {x=cx*CHUNK_SIZE, y=cy*CHUNK_SIZE}
     local right_bottom = {x=left_top.x+CHUNK_SIZE, y=left_top.y+CHUNK_SIZE}
-    local rect_id = draw_chunk_rectangle(surface, player.index, left_top, right_bottom)
-    chunk_rectangles[cx..","..cy] = rect_id
+    
+    -- Draw blue rectangle
+    -- local rect_id = draw_chunk_rectangle(surface, player.index, left_top, right_bottom)
+    -- chunk_rectangles[cx..","..cy] = rect_id
 
     -- Detect belts on chunk edges and create memory cells
     local area = {left_top, right_bottom}
     chunk_memory_cells[cx..","..cy] = {}
     for _, belt in pairs(surface.find_entities_filtered{area=area, type="transport-belt"}) do
         local flow = classify_chunk_edge_belt(belt.position.x, belt.position.y, belt.direction, surface)
-        game.print("belt.position.x: " .. tostring(belt.position.x) .. ", belt.position.y: " .. tostring(belt.position.y) .. ", flow: " .. tostring(flow))
         if flow then
-            local comb = create_memory_cell_for_belt(belt)
+            local comb = create_memory_cell_for_belt(belt, flow)
             if comb then
                 table.insert(chunk_memory_cells[cx..","..cy], comb)
             end
@@ -255,7 +256,7 @@ commands.add_command("light_sleep", "Mark chunk inactive", function(cmd)
     end
 
     update_memory_cell_display()
-    player.print("Chunk ("..cx..","..cy..") marked light_sleep")
+    -- log("Chunk ("..cx..","..cy..") marked light_sleep")
 end)
 
 commands.add_command("awake", "Mark chunk active", function(cmd)
@@ -263,7 +264,7 @@ commands.add_command("awake", "Mark chunk active", function(cmd)
     local args = {}
     for s in string.gmatch(cmd.parameter or "", "%S+") do table.insert(args, s) end
     local cx, cy = tonumber(args[1]), tonumber(args[2])
-    if not cx or not cy then player.print("Usage: /awake <chunk_x> <chunk_y>") return end
+    if not cx or not cy then log("Usage: /awake <chunk_x> <chunk_y>") return end
 
     local surface = player.surface
     local chunk_pos = {x=cx, y=cy}
@@ -286,7 +287,7 @@ commands.add_command("awake", "Mark chunk active", function(cmd)
     chunk_memory_cells[cx..","..cy] = nil
 
     update_memory_cell_display()
-    player.print("Chunk ("..cx..","..cy..") marked awake")
+    -- log("Chunk ("..cx..","..cy..") marked awake")
 end)
 
 -- === Periodic update ===
@@ -296,11 +297,11 @@ script.on_nth_tick(1, update_memory_cell_display)
 script.on_init(function()
     storage.channels = storage.channels or {}
     storage.transceivers = storage.transceivers or {}
-    log("Sleepy Chunks initialized")
+    -- log("Sleepy Chunks initialized")
 end)
 
 script.on_configuration_changed(function()
     storage.channels = storage.channels or {}
     storage.transceivers = storage.transceivers or {}
-    log("Sleepy Chunks configuration changed")
+    -- log("Sleepy Chunks configuration changed")
 end)
