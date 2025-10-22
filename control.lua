@@ -7,6 +7,8 @@ local storage = {}
 storage.channels = {}
 storage.transceivers = {}
 
+local belt_ui = {}
+
 local MEMORY_CELL_SURFACE = "Sleepy Chunks"
 local DEBUG_MODE = true
 
@@ -68,7 +70,7 @@ local function create_hidden_source(force, name, pos)
     local behavior = comb.get_or_create_control_behavior()
     behavior.parameters = {
         comparator = "=",
-        output_signal = {type="virtual", name="signal-anything"},
+        output_signal = {type="virtual", name="signal-everything"},
     }
 
     -- Connect combinator input/output together (red wire) for self-feedback
@@ -94,7 +96,7 @@ local function create_memory_cell(player)
 
     -- Create visible belt
     local belt = surface.create_entity{
-        name="transport-belt",
+        name="turbo-transport-belt",
         position={pos.x-1, pos.y},
         direction=defines.direction.east,
         force=force,
@@ -133,26 +135,57 @@ local function create_memory_cell(player)
     return comb, belt
 end
 
--- === Print memory cell signals ===
-local function print_memory_cell_signals()
-    log("=== Checking memory cell signals ===")
+-- Update memory cell display above belts using belt signals
+local function update_memory_cell_display()
     for i, cell in ipairs(memory_cells) do
-        local comb = cell.combinator
-        if comb and comb.valid then
-            local signals = comb.get_signals(defines.wire_connector_id.combinator_output_red) or {}
-            if #signals > 0 then
-                local str = "Memory Cell "..i..": "
-                for _, s in ipairs(signals) do
-                    str = str..string.format("[%s]=%d ", s.signal.name, s.count)
+        local belt = cell.belt
+        if belt and belt.valid then
+            local signals = belt.get_signals(defines.wire_connector_id.circuit_red) or {}
+
+            -- Remove old renderings if any
+            if belt_ui[belt.unit_number] then
+                for _, id in pairs(belt_ui[belt.unit_number]) do
+                    id.destroy()
                 end
-                game.print(str)
-                log("Memory Cell "..i.." network valid with "..#signals.." signals")
-            else
-                game.print("Memory Cell "..i..": no signals on red wire yet")
-                log("Memory Cell "..i.." network is empty or not initialized")
             end
-        else
-            log("Memory Cell "..i.." combinator invalid")
+            belt_ui[belt.unit_number] = {}
+
+            local x = belt.position.x
+            local y = belt.position.y - 1.5 -- above belt
+            local row = 0
+
+            for _, s in ipairs(signals) do
+                -- Determine sprite type
+                local sprite_name
+                if s.signal.type == "virtual" then
+                    sprite_name = "virtual-signal/" .. s.signal.name
+                else
+                    sprite_name = "item/" .. s.signal.name
+                end
+
+                -- Draw icon
+                local icon_id = rendering.draw_sprite{
+                    sprite = sprite_name,
+                    target = {x=x-1, y=y - row*0.5},
+                    surface = belt.surface,
+                    x_scale = 0.5,
+                    y_scale = 0.5
+                }
+                table.insert(belt_ui[belt.unit_number], icon_id)
+
+                -- Draw text (signal name + count)
+                local text_id = rendering.draw_text{
+                    text = s.signal.name .. ": " .. s.count,
+                    surface = belt.surface,
+                    target = {x=x+0.2, y=y - row*0.5},
+                    color = {r=1, g=1, b=1},
+                    scale = 0.5,
+                    alignment = "left"
+                }
+                table.insert(belt_ui[belt.unit_number], text_id)
+
+                row = row + 1
+            end
         end
     end
 end
@@ -163,7 +196,7 @@ commands.add_command("create_memory_cell", "Create Sleepy Chunks memory cell", f
     create_memory_cell(player)
 end)
 
-script.on_nth_tick(60, print_memory_cell_signals)
+script.on_nth_tick(1, update_memory_cell_display)
 
 -- === Init / configuration changed ===
 script.on_init(function()
