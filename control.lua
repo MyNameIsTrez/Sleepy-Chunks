@@ -1,11 +1,11 @@
 -- control.lua
 -- Sleepy Chunks memory cell tracker and signal printer (decider combinator version with energy interface, all on Nauvis + hidden surface)
 
-memory_cells = memory_cells or {}
+local memory_cells = {}
 
-if not storage then storage = {} end
-storage.channels = storage.channels or {}
-storage.transceivers = storage.transceivers or {}
+local storage = {}
+storage.channels = {}
+storage.transceivers = {}
 
 local MEMORY_CELL_SURFACE = "Sleepy Chunks"
 local DEBUG_MODE = true
@@ -39,42 +39,18 @@ local function get_hidden_surface()
         f.set_surface_hidden(surf, true)
     end
 
+    -- Spawn central pole and energy interface at (0,0)
+    local pole = surf.create_entity{name="big-electric-pole", position={0,0}, force="neutral"}
+    local energy_interface = surf.create_entity{name="electric-energy-interface", position={0,0}, force="neutral"}
+    energy_interface.energy = energy_interface.electric_buffer_size
+    log("Spawned central pole and energy interface at (0,0) on hidden surface")
+
     return surf
-end
-
--- === Hidden central pole for a channel ===
-local function get_hidden_pole(force, channel, pos)
-    storage.channels[force.name] = storage.channels[force.name] or {}
-    local pole = storage.channels[force.name][channel]
-    if pole and pole.valid then
-        log("Reusing existing hidden pole for "..force.name.." / "..channel)
-        return pole
-    end
-
-    local surf = get_hidden_surface()
-    pole = surf.create_entity{name="big-electric-pole", position=pos, force=force}
-    storage.channels[force.name][channel] = pole
-    log("Created hidden pole for "..force.name.." / "..channel.." at "..pos.x..","..pos.y)
-    return pole
 end
 
 -- === Hidden decider combinator (signal source) with energy interface ===
 local function create_hidden_source(force, name, pos)
     local surf = get_hidden_surface()
-
-    -- Energy interface to power the combinator
-    local energy_interface = surf.create_entity{
-        name="electric-energy-interface",
-        position=pos,
-        force=force,
-        create_build_effect_smoke=false
-    }
-    if not energy_interface or not energy_interface.valid then
-        log("ERROR: Failed to create energy interface for "..name)
-        return nil
-    end
-    energy_interface.energy = energy_interface.electric_buffer_size -- fully charged
-    log("Created energy interface at "..pos.x..","..pos.y.." for "..name)
 
     -- Decider combinator
     local comb = surf.create_entity{
@@ -134,36 +110,26 @@ local function create_memory_cell(player)
     belt_behavior.read_contents = true
     log("Belt created at "..(pos.x-1)..","..pos.y.." (unit_number="..belt.unit_number..")")
 
-    -- Offset for hidden combinator/pole (avoid overlapping)
+    -- Hidden decider combinator on hidden surface
     local hidden_pos = {x=0, y=0}
-
-    -- Hidden decider combinator as signal source with energy interface
     local comb = create_hidden_source(force, "cell-"..belt.unit_number, hidden_pos)
     if not comb then
         log("ERROR: failed to create hidden source combinator")
         return nil
     end
 
-    -- Hidden central pole for the channel
-    local pole = get_hidden_pole(force, "cell-pole-"..belt.unit_number, hidden_pos)
-    if not pole or not pole.valid then
-        log("ERROR: failed to create hidden pole")
-        return nil
+    -- Connect belt to combinator via red wire
+    local belt_conn = belt.get_wire_connector(defines.wire_connector_id.circuit_red, true)
+    local comb_in = comb.get_wire_connector(defines.wire_connector_id.combinator_input_red, true)
+    if belt_conn and comb_in then
+        local connected = belt_conn.connect_to(comb_in, false, defines.wire_origin.player)
+        log("Connected belt->combinator red wire: "..tostring(connected))
+    else
+        log("ERROR: failed to get connectors for belt->combinator connection")
     end
 
-    -- Connect combinator to pole
-    local comb_out = comb.get_wire_connector(defines.wire_connector_id.combinator_output_red, true)
-    local pole_conn = pole.get_wire_connector(defines.wire_connector_id.circuit_red, true)
-    local comb_connected = comb_out.connect_to(pole_conn, false, defines.wire_origin.player)
-    log("Comb->Pole connect_to returned: "..tostring(comb_connected))
-
-    -- Connect belt to pole
-    local belt_out = belt.get_wire_connector(defines.wire_connector_id.circuit_red, true)
-    local belt_connected = belt_out.connect_to(pole_conn, false, defines.wire_origin.player)
-    log("Belt->Pole connect_to returned: "..tostring(belt_connected))
-
-    memory_cells[#memory_cells+1] = {combinator=comb, belt=belt, pole=pole}
-    player.print("Memory cell created and connected via hidden source and pole.")
+    memory_cells[#memory_cells+1] = {combinator=comb, belt=belt}
+    player.print("Memory cell created and connected via hidden combinator.")
     return comb, belt
 end
 
